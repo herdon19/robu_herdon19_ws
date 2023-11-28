@@ -122,7 +122,8 @@ class WallFollower(Node):
                 if turn_direction == 0:
                     print("WF_STATE_FOLLOWWALL")
                     self.wallfollower_state = WallFollowerStates.WF_STATE_FOLLOWWALL
-        elif self.wallfollower_state == WallFollowerStates.WF_STATE_FOLLOWWALL
+        elif self.wallfollower_state == WallFollowerStates.WF_STATE_FOLLOWWALL:
+            pass
             
 
         print(msg)
