@@ -22,6 +22,7 @@ ROBOT_DIRECTION_LEFT_FRONT_INDEX = 45
 
 
 class WallFollowerStates(IntEnum):
+    WF_STATE_INVALID = -1,
     WF_STATE_DETECTWALL = 0,
     WF_STATE_DRIVE2WALL = 1,
     WF_STATE_ROTATE2WALL = 2,
@@ -42,7 +43,7 @@ class WallFollower(Node):
 
         self.distances = []
 
-        self.wallfollower_state = WallFollowerStates.WF_STATE_DETECTWALL
+        self.wallfollower_state = WallFollowerStates.WF_STATE_INVALID
 
         self.forward_speed_wf_slow = 0.05 #m/s
         self.forward_speed_wf_fast = 0.1 #m/s
@@ -74,10 +75,16 @@ class WallFollower(Node):
         msg.angular.y = 0.0
         msg.angular.z = 0.0
 
-        if self.wallfollower_state == WallFollowerStates.WF_STATE_DETECTWALL:
+        if self.wallfollower_state == WallFollowerStates.WF_STATE_INVALID:
+            print("WF_STATE_INVALID")
+            self.wallfollower_state = WallFollowerStates.WF_STATE_DETECTWALL
+
+        elif self.wallfollower_state == WallFollowerStates.WF_STATE_DETECTWALL:
             dist_min = min(self.distances)
             #Drehe Roboter solange bis auf der x-achse der Mindestabstand erscheint
             if self.front_dist > (dist_min + self.dist_laser_offset):
+                print("Roboter dreht sich")
+                #Wenn der Roboter kurz vor dem Mindestabstand ist, verringert die
                 if (self.front_dist - dist_min) < 0.2:
                     msg.angular.z = self.turning_speed_wf_slow
                 else:
@@ -85,7 +92,72 @@ class WallFollower(Node):
             else:
                 print("WF_STATE_DRIVE2WALL")
                 self.wallfollower_state = WallFollowerStates.WF_STATE_DRIVE2WALL
+        
+        elif self.wallfollower_state == WallFollowerStates.WF_STATE_DRIVE2WALL:
+            fd_thresh = self.dist_thresh_wf + self.dist_laser_offset
+
+            forward_speed_wf = self.calc_linear_speed()
+
+            if self.front_dist > (fd_thresh + self.dist_hysteris_wf):
+                msg.linear.x = forward_speed_wf
+            elif self.front_dist < (fd_thresh - self.dist_hysteris_wf):
+                msg.linear.x = -forward_speed_wf
+            else:
+                turn_direction = self.align_front()
+                msg.angular.z = self.turning_speed_wf_slow * turn_direction
+                if turn_direction == 0:
+                    print("WF_STATE_ROTATE2WALL")
+                    #save the current distances as input for the state ROTATE2WALL
+                    self.wallfollower_state_input_dist = self.distances
+                    self.wallfollower_state = WallFollowerStates.WF_STATE_ROTATE2WALL
+
+        elif self.wallfollower_state == WallFollowerStates.WF_STATE_ROTATE2WALL:
+            sr = self.wallfollower_state_input_dist[ROBOT_DIRECTION_RIGHT_INDEX]
+            if((sr != np.inf) and (abs(self.front_dist - self.dist_laser_offset -sr)
+                >0.05)) or ((self.front_dist != np.inf) and (sr == np.inf)):
+                msg.angular.z = -self.turning_speed_wf_fast
+            else:
+                turn_direction = self.align_left()
+                msg.angular.z = self.turning_speed_wf_slow * turn_direction
+                if turn_direction == 0:
+                    print("WF_STATE_FOLLOWWALL")
+                    self.wallfollower_state = WallFollowerStates.WF_STATE_FOLLOWWALL
+        elif self.wallfollower_state == WallFollowerStates.WF_STATE_FOLLOWWALL
+            
+
+        print(msg)
         self.cmd_vel_publisher.publish(msg)
+
+    def align_left(self):
+        fl = self.distances[ROBOT_DIRECTION_LEFT_FRONT_INDEX]
+        rl = self.distances[ROBOT_DIRECTION_LEFT_REAR_INDEX]
+
+        if(fl - rl) > self.dist_hysteris_wf:
+            return 1 #turning left
+        elif(rl - fl) > self.dist_hysteris_wf:
+            return -1 #turning right
+        else:
+            return 0 #aligned
+    
+    def align_front(self):
+        fl = self.distances[ROBOT_DIRECTION_LEFT_FRONT_INDEX]
+        fr = self.distances[ROBOT_DIRECTION_RIGHT_FRONT_INDEX]
+
+        if(fl - fr) > self.dist_hysteris_wf:
+            return 1 #turning left
+        elif(fr - fl) > self.dist_hysteris_wf:
+            return -1 #turning right
+        else:
+            return 0 #aligned
+
+    def calc_linear_speed(self):
+        fd_thresh = self.dist_thresh_wf + self.dist_laser_offset
+        if self.front_dist > (1.2 * fd_thresh):
+            forward_speed_wf = self.forward_speed_wf_fast
+        else:
+            forward_speed_wf = self.forward_speed_wf_slow
+        
+        return forward_speed_wf
 
 
     def scan_callback(self, msg):
